@@ -23,9 +23,16 @@ Mark each item ✅ or ❌. Flag anything the dev must still handle manually.
 ## Modern JS
 - [ ] No `for`/`while` loops on collections — uses `map`/`filter`/`reduce`
 - [ ] No `.then()` chains — uses `async/await`
-- [ ] No `await` inside a loop — uses `Promise.all()` for parallel operations
+- [ ] No `await` inside a loop — parallel ops use `Promise.all()`; sequential pagination uses a recursive async function
+- [ ] No `/* eslint-disable no-await-in-loop */` — if you think you need it, the structure is wrong
 - [ ] `?.` and `??` only on genuinely optional values — never on required business data
 - [ ] `var` nowhere — `const` by default, `let` only when reassignment needed
+
+## Express Handlers & Middleware
+- [ ] No `return res.json(...)` mixed with no-return paths — uses if/else throughout
+- [ ] No bare `return;` as a band-aid for `consistent-return` — if/else is the fix
+- [ ] No `/* eslint-disable consistent-return */` — fix the structure instead
+- [ ] No `eslint-disable` of any kind without explicit developer approval
 
 ## Coupling
 - [ ] Changing this code breaks ≤ 3 files outside this domain folder

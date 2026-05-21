@@ -28,6 +28,55 @@ export { PlatformConnectionService };
 const doc = await model.findOne({ userId });
 ```
 
+### `await` inside a loop — banned without exception
+
+`eslint no-await-in-loop` is **never disabled**. The rule exists because sequential awaits in a loop almost always indicate either a parallelism bug or a structural flaw.
+
+**Two legitimate sequential-await scenarios and their correct solutions:**
+
+**1. Parallel operations** → `Promise.all()`
+```js
+// WRONG
+for (const connection of connections) {
+  await syncAccount(connection); // sequential, slow
+}
+
+// CORRECT
+await Promise.all(connections.map(syncAccount));
+
+// CORRECT with concurrency limit (use p-limit if needed)
+import pLimit from 'p-limit';
+const limit = pLimit(5);
+await Promise.all(connections.map(c => limit(() => syncAccount(c))));
+```
+
+**2. Pagination (each page depends on the previous cursor)** → recursive async function
+```js
+// WRONG — await inside a while-loop
+async function fetchAll(url, params) {
+  const items = [];
+  while (url) {
+    const { data } = await axios.get(url, url.includes('?') ? {} : { params }); // ← lint error
+    items.push(...data.data);
+    url = data.paging?.next || null;
+  }
+  return items;
+}
+
+// CORRECT — recursive, no loop, no lint disable needed
+async function fetchAllPages(url, params) {
+  const { data } = await axios.get(url, url.includes('?') ? {} : { params });
+  const items = data.data || [];
+  if (!data.paging?.next) return items;
+  const rest = await fetchAllPages(data.paging.next, {});
+  return [...items, ...rest];
+}
+```
+
+The recursive approach is not a workaround — it's the correct model: each page is a function call whose result depends on the previous result. That's recursion, not iteration.
+
+**Never add `/* eslint-disable no-await-in-loop */`.** If you think you need it, the structure is wrong. Fix the structure.
+
 ### Apply with caution — `?.` and `??`
 
 Use ONLY for genuinely optional display values or config defaults.
@@ -176,6 +225,75 @@ expect(result.status).to.equal('connected');
 
 One test per behavior. Write the test before the implementation (red → green → refactor).
 If your test breaks when you rename an internal method but behavior didn't change, the test is wrong.
+
+---
+
+## Express Handler & Middleware Patterns
+
+### `consistent-return` — the real fix is if/else
+
+Express handlers do not return values — they respond and exit. Mixing `return res.json(...)` with paths that return nothing violates `consistent-return`. **The fix is not `return;` (returning `undefined` as a band-aid). The fix is if/else.**
+
+```js
+// WRONG — mixed returns: one path returns a Response, other returns nothing
+async (req, res) => {
+  if (!userId) return res.status(400).json({ error: 'userId required' }); // returns Response
+  res.status(200).json({ ok: true }); // returns nothing
+};
+
+// WRONG — band-aid: return; (returns undefined, inconsistent with no-return paths)
+async (req, res) => {
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+    return; // returns undefined — hides the structural problem
+  }
+  res.status(200).json({ ok: true });
+};
+
+// CORRECT — if/else: function always falls off the end, never returns a value
+async (req, res) => {
+  if (!userId) {
+    res.status(400).json({ error: 'userId required' });
+  } else {
+    res.status(200).json({ ok: true });
+  }
+};
+```
+
+### Middleware — same rule
+
+```js
+// WRONG — return res.json() and return next() are inconsistent types
+function requireAuth(req, res, next) {
+  if (!req.headers.authorization) return res.status(401).json({ error: 'Unauthorized' });
+  return next();
+}
+
+// CORRECT — if/else, function never returns a value
+function requireAuth(req, res, next) {
+  if (!req.headers.authorization) {
+    res.status(401).json({ error: 'Unauthorized' });
+  } else {
+    next();
+  }
+}
+```
+
+The rule: **Express handlers and middleware respond — they do not produce values. If your function has a `return res.something()` anywhere, convert all branches to if/else.**
+
+---
+
+### ESLint disables — require explicit approval
+
+**Never add `/* eslint-disable <rule> */` without explicit developer approval.** A lint disable is a permanent team decision, not a personal shortcut.
+
+Rules that are especially never disabled:
+- `no-await-in-loop` — fix the structure (see above)
+- `consistent-return` — fix with if/else (see above)
+- `no-process-env` — all env reads belong in `src/config/`
+- `no-restricted-imports` — domain boundary violations must be fixed, not suppressed
+
+Per-line `// eslint-disable-next-line` for a specific, documented reason (e.g. a third-party library quirk) is the one acceptable form. File-level disables are never acceptable.
 
 ---
 
